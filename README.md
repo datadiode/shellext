@@ -30,15 +30,15 @@ HKCR
 }
 
 [Format source code with clang-format]
-command="clang-format.exe" -i "<filename>",1
+command="clang-format.exe" -i "<filename>" ,1
 filter=*.c;*.h;*.cpp;*.hpp;*.cxx;*.hxx
 
 [Format source code with pasfmt]
-command="pasfmt.exe" "<filename>",1
+command="pasfmt.exe" "<filename>" ,1
 filter=*.pas;*.iss
 
 [ping 127.0.0.1 to see the progress window]
-command="ping.exe" "127.0.0.1",3
+command="ping.exe" "127.0.0.1" ,3
 ```
 
 The configuration file is essentially an INI file which starts with an RGS script to control how the component registers with the operating system.

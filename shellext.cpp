@@ -26,58 +26,6 @@ class ATL_NO_VTABLE CShellExt :
 	public IContextMenu
 {
 public:
-	CShellExt()
-		: _bitmap(NULL)
-	{
-		WCHAR module_path[MAX_PATH];
-		GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
-
-		PathRenameExtension(module_path, L".png");
-		Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-		ULONG_PTR gdiplusToken;
-		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-		if (Gdiplus::Bitmap *const bitmap = Gdiplus::Bitmap::FromFile(module_path))
-		{
-			if (Gdiplus::Bitmap *const scaled = new Gdiplus::Bitmap(
-				GetSystemMetrics(SM_CXMENUCHECK), GetSystemMetrics(SM_CYMENUCHECK)))
-			{
-				if (Gdiplus::Graphics *const graphics = Gdiplus::Graphics::FromImage(scaled))
-				{
-					graphics->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
-					Gdiplus::RectF rect(0, 0, Gdiplus::REAL(scaled->GetWidth()), Gdiplus::REAL(scaled->GetHeight()));
-					COLORREF rgb = GetSysColor(COLOR_3DFACE);
-					Gdiplus::SolidBrush brush(Gdiplus::Color(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb)));
-					graphics->FillRectangle(&brush, rect);
-					graphics->DrawImage(bitmap, rect,
-										0, 0, Gdiplus::REAL(bitmap->GetWidth()), Gdiplus::REAL(bitmap->GetHeight()),
-										Gdiplus::UnitPixel);
-					delete graphics;
-				}
-				scaled->GetHBITMAP(Gdiplus::Color::Transparent, &_bitmap);
-				delete scaled;
-			}
-			delete bitmap;
-		}
-		Gdiplus::GdiplusShutdown(gdiplusToken);
-
-		PathRenameExtension(module_path, L".ini");
-		WCHAR buffer[1024];
-		if (GetPrivateProfileSectionNames(buffer, _countof(buffer), module_path))
-		{
-			for (WCHAR* p = buffer; *p; p += wcslen(p) + 1)
-			{
-				_sectionNames.push_back(p);
-			}
-		}
-	}
-
-	~CShellExt()
-	{
-		::DeleteObject(_bitmap);
-	}
-
-	DECLARE_REGISTRY_RESOURCEID(1)
-
 	DECLARE_NOT_AGGREGATABLE(CShellExt)
 
 	BEGIN_COM_MAP(CShellExt)
@@ -87,7 +35,10 @@ public:
 
 	DECLARE_PROTECT_FINAL_CONSTRUCT()
 
-public:
+	static HRESULT WINAPI UpdateRegistry(BOOL);
+	HRESULT FinalConstruct();
+	void FinalRelease();
+
 	STDMETHODIMP Initialize(
 		PCIDLIST_ABSOLUTE pidlFolder,
 		IDataObject* pdtobj,
@@ -111,11 +62,11 @@ public:
 		UINT uFlags);
 
 private:
-	void ProcessFiles(UINT idCmd);
+	void ProcessFiles(HWND hWnd, UINT idCmd);
 
 	std::vector<std::wstring> _selectedFiles;
-	std::vector<std::wstring> _sectionNames;
-	HBITMAP _bitmap;
+	std::vector<std::string> _sectionNames;
+	HBITMAP _bitmap = NULL;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_ShellExt, CShellExt)
@@ -148,8 +99,8 @@ public:
 	{
 		if (_hDrop)
 		{
-			::GlobalUnlock(_stgm.hGlobal);
-			::ReleaseStgMedium(&_stgm);
+			GlobalUnlock(_stgm.hGlobal);
+			ReleaseStgMedium(&_stgm);
 		}
 	}
 
@@ -158,7 +109,7 @@ public:
 	std::wstring FileAt(UINT index) const 
 	{
 		WCHAR filenameBuffer[MAX_PATH];
-		UINT copied = ::DragQueryFile(_hDrop, index, filenameBuffer, _countof(filenameBuffer));
+		UINT copied = DragQueryFile(_hDrop, index, filenameBuffer, _countof(filenameBuffer));
 		return std::wstring(filenameBuffer, copied > 0 && copied < _countof(filenameBuffer) ? copied : 0);
 	}
 
@@ -195,6 +146,97 @@ STDMETHODIMP CShellExt::Initialize(
 	}
 }
 
+HRESULT CShellExt::UpdateRegistry(BOOL bRegister)
+{
+	// Read the rgs script from the rgs/ini hybrid file.
+	try
+	{
+		CRegObject ro;
+		ATLENSURE_SUCCEEDED(ro.FinalConstruct());
+		WCHAR module_path[MAX_PATH];
+		GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
+		ATLENSURE_SUCCEEDED(ro.AddReplacement(OLESTR("Module"), module_path));
+		PathRenameExtension(module_path, L".ini");
+		std::wifstream stream(module_path);
+		std::wstring data;
+		if (std::getline(stream, data, L'['))
+		{
+			auto method = bRegister ? &CRegObject::StringRegister : &CRegObject::StringUnregister;
+			ATLENSURE_SUCCEEDED((ro.*method)(data.c_str()));
+		}
+		return S_OK;
+	}
+	catch (...)
+	{
+		return UncatchAs<HRESULT>();
+	}
+}
+
+HRESULT CShellExt::FinalConstruct()
+{
+	try
+	{
+		WCHAR module_path[MAX_PATH];
+		GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
+
+		PathRenameExtension(module_path, L".png");
+		Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+		ULONG_PTR gdiplusToken;
+		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+		if (Gdiplus::Bitmap* const bitmap = Gdiplus::Bitmap::FromFile(module_path))
+		{
+			if (Gdiplus::Bitmap* const scaled = new Gdiplus::Bitmap(
+				GetSystemMetrics(SM_CXMENUCHECK), GetSystemMetrics(SM_CYMENUCHECK)))
+			{
+				if (Gdiplus::Graphics* const graphics = Gdiplus::Graphics::FromImage(scaled))
+				{
+					graphics->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+					Gdiplus::RectF rect(0, 0, Gdiplus::REAL(scaled->GetWidth()), Gdiplus::REAL(scaled->GetHeight()));
+					COLORREF rgb = GetSysColor(COLOR_3DFACE);
+					Gdiplus::SolidBrush brush(Gdiplus::Color(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb)));
+					graphics->FillRectangle(&brush, rect);
+					graphics->DrawImage(bitmap, rect,
+						0, 0, Gdiplus::REAL(bitmap->GetWidth()), Gdiplus::REAL(bitmap->GetHeight()),
+						Gdiplus::UnitPixel);
+					delete graphics;
+				}
+				scaled->GetHBITMAP(Gdiplus::Color::Transparent, &_bitmap);
+				delete scaled;
+			}
+			delete bitmap;
+		}
+		Gdiplus::GdiplusShutdown(gdiplusToken);
+
+		PathRenameExtension(module_path, L".ini");
+		struct _stat32 stat32;
+		if (_wstat32(module_path, &stat32) == 0)
+		{
+			std::vector<WCHAR> buffer(stat32.st_size);
+			LPWSTR p = buffer.data();
+			if (GetPrivateProfileSectionNames(p, stat32.st_size, module_path))
+			{
+				while (const size_t n = wcslen(p))
+				{
+#pragma warning(disable: 4244)
+					_sectionNames.emplace_back(p, p + n); // narrowing is intentional
+#pragma warning(default: 4244)
+					p += n + 1;
+				}
+			}
+		}
+		return S_OK;
+	}
+	catch (...)
+	{
+		return UncatchAs<HRESULT>();
+	}
+}
+
+void CShellExt::FinalRelease()
+{
+	DeleteObject(_bitmap);
+}
+
 STDMETHODIMP CShellExt::GetCommandString(
 	UINT_PTR idCmd,
 	UINT uFlags,
@@ -216,7 +258,7 @@ STDMETHODIMP CShellExt::InvokeCommand(
 		// extract command index from the low word
 		if (UINT idCmd = LOWORD(pici->lpVerb); idCmd < _sectionNames.size())
 		{
-			ProcessFiles(idCmd);
+			ProcessFiles(pici->hwnd, idCmd);
 			return S_OK;
 		}
 		else
@@ -240,12 +282,36 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 	try
 	{
 		if (uFlags & CMF_DEFAULTONLY) return 0;
+
+		const LCID lcid = GetUserDefaultUILanguage();
+		WCHAR lang[4];
+		WCHAR ctry[4];
+		GetLocaleInfo(lcid, LOCALE_SISO639LANGNAME, lang, _countof(lang));
+		GetLocaleInfo(lcid, LOCALE_SISO3166CTRYNAME, ctry, _countof(ctry));
+		WCHAR precise[12];
+		WCHAR fallback[8];
+		StringCchPrintf(precise, _countof(precise), L";%s-%s=", lang, ctry);
+		StringCchPrintf(fallback, _countof(fallback), L";%s=", lang);
+
 		UINT count = 0;
 		for (const auto &sectionName : _sectionNames)
 		{
 			if (idCmdFirst == idCmdLast)
 				break;
-			::InsertMenu(hMenu, indexMenu, MF_STRING | MF_BYPOSITION, idCmdFirst++, sectionName.c_str());
+
+			WCHAR utf16[1024];
+			if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, sectionName.c_str(), -1, utf16, _countof(utf16)))
+				break;
+
+			LPCWSTR q = utf16;
+			LPWSTR r = std::wcsstr(utf16, precise);
+			if (r != NULL || (r = std::wcsstr(utf16, fallback)) != NULL)
+				if ((r = std::wcschr(r, L'=')) != NULL)
+					q = ++r;
+			if ((r = std::wcschr(std::max<LPWSTR>(utf16, r), L';')) != NULL)
+				*r = L'\0';
+
+			::InsertMenu(hMenu, indexMenu, MF_STRING | MF_BYPOSITION, idCmdFirst++, q);
 			::SetMenuItemBitmaps(hMenu, indexMenu, MF_BYPOSITION, _bitmap, NULL);
 			++indexMenu;
 			++count;
@@ -258,32 +324,29 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 	}
 }
 
-void CShellExt::ProcessFiles(UINT idCmd)
+void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 {
 	CComBSTR workers;
 	ATLENSURE(workers.LoadString(1));
-
-	CComPtr<IProgressDialog> progress;
-	ATLENSURE_SUCCEEDED(progress.CoCreateInstance(CLSID_ProgressDialog, NULL, CLSCTX_INPROC_SERVER));
-	progress->SetTitle(_sectionNames[idCmd].c_str());
-	progress->StartProgressDialog(NULL, NULL, PROGDLG_AUTOTIME, NULL);
-
-	const DWORD total = static_cast<DWORD>(_selectedFiles.size());
-	DWORD finished = 0;
 
 	WCHAR module_path[MAX_PATH];
 	GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
 	PathRenameExtension(module_path, L".ini");
 
+	const std::wstring key(PBYTE(&_sectionNames[idCmd].front()), PBYTE(&_sectionNames[idCmd].back() + 1));
+
 	WCHAR command[1024];
-	GetPrivateProfileString(_sectionNames[idCmd].c_str(), L"command", L"", command, _countof(command), module_path);
+	GetPrivateProfileString(key.c_str(), L"command", L"", command, _countof(command), module_path);
 	const LPWSTR args = PathGetArgs(command);
 	PathRemoveArgs(command);
 
 	WCHAR filter[MAX_PATH];
-	GetPrivateProfileString(_sectionNames[idCmd].c_str(), L"filter", L"*.*", filter, _countof(filter), module_path);
+	GetPrivateProfileString(key.c_str(), L"filter", L"*.*", filter, _countof(filter), module_path);
 
-	const int show = GetPrivateProfileInt(_sectionNames[idCmd].c_str(), L"show", SW_HIDE, module_path);
+	WCHAR destfolder[MAX_PATH];
+	GetPrivateProfileString(key.c_str(), L"destfolder", L".", destfolder, _countof(destfolder), module_path);
+
+	const int show = GetPrivateProfileInt(key.c_str(), L"show", SW_HIDE, module_path);
 
 	PathRemoveFileSpec(module_path);
 
@@ -301,8 +364,46 @@ void CShellExt::ProcessFiles(UINT idCmd)
 			limit = 1;
 	}
 
+	if (std::wstring_view(args).find(L"<destfolder>") != std::wstring_view::npos)
+	{
+		CComBSTR title;
+		ATLENSURE(title.LoadString(2));
+		BROWSEINFO bi = { hWnd };
+		bi.ulFlags = BIF_USENEWUI;
+		bi.lpszTitle = title;
+		CreateDirectory(destfolder, NULL);
+		SHILCreateFromPath(destfolder, const_cast<LPITEMIDLIST*>(&bi.pidlRoot), NULL);
+		BOOL ok = FALSE;
+		if (PIDLIST_ABSOLUTE pidl =	SHBrowseForFolder(&bi))
+		{
+			ok = SHGetPathFromIDList(pidl, destfolder);
+			CoTaskMemFree(pidl);
+		}
+		CoTaskMemFree(const_cast<LPITEMIDLIST>(bi.pidlRoot));
+		if (!ok)
+			return;
+	}
+
+	CComPtr<IProgressDialog> progress;
+	ATLENSURE_SUCCEEDED(progress.CoCreateInstance(CLSID_ProgressDialog, NULL, CLSCTX_INPROC_SERVER));
+
+	// Query the localized menu item text to use as the progress dialog title.
+	if (const HMENU hMenu = CreatePopupMenu())
+	{
+		WCHAR title[256];
+		QueryContextMenu(hMenu, 0, 0, static_cast<UINT>(_sectionNames.size()), 0);
+		GetMenuString(hMenu, idCmd, title, _countof(title), MF_BYPOSITION);
+		progress->SetTitle(title);
+		DestroyMenu(hMenu);
+	}
+
+	progress->StartProgressDialog(hWnd, NULL, PROGDLG_AUTOTIME, NULL);
+
 	std::vector<HANDLE> satellites;
 	satellites.reserve(limit);
+
+	const DWORD total = static_cast<DWORD>(_selectedFiles.size());
+	DWORD finished = 0;
 
 	auto it = _selectedFiles.begin();
 	while ((satellites.size() || it != _selectedFiles.end()) && !progress->HasUserCancelled())
@@ -318,7 +419,7 @@ void CShellExt::ProcessFiles(UINT idCmd)
 				satellites.erase(satellites.begin() + (wait - WAIT_OBJECT_0));
 				progress->SetProgress(++finished, total);
 			}
-		}	
+		}
 		while (satellites.size() < static_cast<DWORD>(limit) && it != _selectedFiles.end())
 		{
 			const auto &filename = *it++;
@@ -332,11 +433,15 @@ void CShellExt::ProcessFiles(UINT idCmd)
 			command.append(L"\"").append(path).append(L"\" ").append(args);
 			replace_all(command, L"<filename>", filename);
 			replace_all(command, L"<basename>", filename.substr(0, filename.find_last_of(L".")));
+			replace_all(command, L"<destfolder>", destfolder);
 
 			PROCESS_INFORMATION pi;
 			STARTUPINFOW si = { sizeof(si) };
 			si.wShowWindow = static_cast<WORD>(show);
-			if (CreateProcess(NULL, command.data(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
+			DWORD flags = 0;
+			if (show == SW_HIDE)
+				flags |= CREATE_NO_WINDOW;
+			if (CreateProcess(NULL, command.data(), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
 			{
 				CloseHandle(pi.hThread);
 				satellites.push_back(pi.hProcess);

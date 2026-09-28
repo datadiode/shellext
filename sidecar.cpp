@@ -10,33 +10,6 @@ class CPluscontrolShellExtModule : public CAtlDllModuleT<CPluscontrolShellExtMod
 {
 } _AtlModule;
 
-// Registration helper
-static HRESULT RegisterUnregisterShellExt(BOOL bRegister)
-{
-	// Read the rgs script from the rgs/ini hybrid file.
-	try
-	{
-		CRegObject ro;
-		ATLENSURE_SUCCEEDED(ro.FinalConstruct());
-		WCHAR module_path[MAX_PATH];
-		GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
-		ATLENSURE_SUCCEEDED(ro.AddReplacement(OLESTR("Module"), module_path));
-		PathRenameExtension(module_path, L".ini");
-		std::wifstream stream(module_path);
-		std::wstring data;
-		if (std::getline(stream, data, L'['))
-		{
-			auto method = bRegister ? &CRegObject::StringRegister : &CRegObject::StringUnregister;
-			ATLENSURE_SUCCEEDED((ro.*method)(data.c_str()));
-		}
-		return S_OK;
-	}
-	catch (...)
-	{
-		return UncatchAs<HRESULT>();
-	}
-}
-
 CLSID CLSID_ShellExt = CLSID_NULL;
 
 // DLL Entry Point
@@ -48,7 +21,7 @@ EXTERN_C BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReser
 		try
 		{
 			WCHAR module_path[MAX_PATH];
-			GetModuleFileName(_AtlBaseModule.GetModuleInstance(), module_path, _countof(module_path));
+			GetModuleFileName(hInstance, module_path, _countof(module_path));
 			PathRenameExtension(module_path, L".ini");
 			std::wifstream stream(module_path);
 			std::wstring data;
@@ -83,13 +56,13 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
 // DllRegisterServer - Adds entries to the system registry.
 STDAPI DllRegisterServer()
 {
-	return RegisterUnregisterShellExt(TRUE);
+	return _AtlModule.DllRegisterServer(FALSE);
 }
 
 // DllUnregisterServer - Removes entries from the system registry.
 STDAPI DllUnregisterServer()
 {
-	return RegisterUnregisterShellExt(FALSE);
+	return _AtlModule.DllUnregisterServer(FALSE);
 }
 
 // DllInstall - Adds/Removes entries to the system registry per user per machine.
@@ -108,6 +81,14 @@ STDAPI DllInstall(BOOL bInstall, LPCWSTR pszCmdLine)
 				return hr;
 			if (FAILED(hr = static_cast<IClassFactory*>(pv)->CreateInstance(NULL, IID_IContextMenu, &pv)))
 				return hr;
+			if (HMENU hMenu = CreatePopupMenu())
+			{
+				static_cast<IContextMenu*>(pv)->QueryContextMenu(hMenu, 0, 1, 5, 0);
+				DestroyMenu(hMenu);
+				CMINVOKECOMMANDINFO ici = { sizeof(ici) };
+				static_cast<IContextMenu*>(pv)->InvokeCommand(&ici);
+			}
+			static_cast<IUnknown*>(pv)->Release();
 			return S_OK;
 		}
 #endif
