@@ -360,9 +360,8 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 		SYSTEM_INFO si;
 		GetSystemInfo(&si);
 		limit += si.dwNumberOfProcessors;
-		if (limit < 1)
-			limit = 1;
 	}
+	limit = std::clamp(limit, 1, MAXIMUM_WAIT_OBJECTS);
 
 	if (std::wstring_view(args).find(L"<destfolder>") != std::wstring_view::npos)
 	{
