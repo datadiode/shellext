@@ -303,17 +303,38 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 			if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, sectionName.c_str(), -1, utf16, _countof(utf16)))
 				break;
 
-			LPCWSTR q = utf16;
-			LPWSTR r = std::wcsstr(utf16, precise);
-			if (r != NULL || (r = std::wcsstr(utf16, fallback)) != NULL)
-				if ((r = std::wcschr(r, L'=')) != NULL)
-					q = ++r;
-			if ((r = std::wcschr(std::max<LPWSTR>(utf16, r), L';')) != NULL)
-				*r = L'\0';
+			UINT uFlags = MF_STRING | MF_BYPOSITION;
 
-			::InsertMenu(hMenu, indexMenu, MF_STRING | MF_BYPOSITION, idCmdFirst++, q);
-			::SetMenuItemBitmaps(hMenu, indexMenu, MF_BYPOSITION, _bitmap, NULL);
-			++indexMenu;
+			LPCWSTR q = utf16;
+			if (*q == '~')
+				++q;
+
+			if (LPWSTR filter = std::wcsstr(utf16, L";*."); filter++ &&
+				std::any_of(_selectedFiles.begin(), _selectedFiles.end(),
+							[filter](const std::wstring& filename)
+							{
+								return !PathMatchSpec(filename.c_str(), filter);
+							}))
+			{
+				uFlags |= MF_GRAYED;
+				q = utf16;
+			}
+
+			if (*q != '~')
+			{
+				LPWSTR r = std::wcsstr(utf16, precise);
+				if (r != NULL || (r = std::wcsstr(utf16, fallback)) != NULL)
+					if ((r = std::wcschr(r, L'=')) != NULL)
+						q = ++r;
+				if ((r = std::wcschr(std::max<LPWSTR>(utf16, r), L';')) != NULL)
+					*r = L'\0';
+
+				InsertMenu(hMenu, indexMenu, uFlags, idCmdFirst, q);
+				SetMenuItemBitmaps(hMenu, indexMenu, MF_BYPOSITION, _bitmap, NULL);
+				++indexMenu;
+			}
+
+			++idCmdFirst;
 			++count;
 		}
 		return count;
@@ -334,14 +355,12 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	PathRenameExtension(module_path, L".ini");
 
 	const std::wstring key(PBYTE(&_sectionNames[idCmd].front()), PBYTE(&_sectionNames[idCmd].back() + 1));
+	const size_t keyfilter(key.find(L";*.") + 1); // if != 0, offset of the filter in the key string
 
 	WCHAR command[1024];
 	GetPrivateProfileString(key.c_str(), L"command", L"", command, _countof(command), module_path);
 	const LPWSTR args = PathGetArgs(command);
 	PathRemoveArgs(command);
-
-	WCHAR filter[MAX_PATH];
-	GetPrivateProfileString(key.c_str(), L"filter", L"*.*", filter, _countof(filter), module_path);
 
 	WCHAR destfolder[MAX_PATH];
 	GetPrivateProfileString(key.c_str(), L"destfolder", L".", destfolder, _countof(destfolder), module_path);
@@ -422,11 +441,13 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 		while (satellites.size() < static_cast<DWORD>(limit) && it != _selectedFiles.end())
 		{
 			const auto &filename = *it++;
+
+			// Skip files that don't match the filter, if any.
+			if (keyfilter && !PathMatchSpec(filename.c_str(), &key[keyfilter]))
+				continue;
+
 			// Show the most recently added conversion candidate.
 			progress->SetLine(2, PathFindFileName(filename.c_str()), FALSE, NULL);
-
-			if (!PathMatchSpec(filename.c_str(), filter))
-				continue;
 
 			std::wstring command;
 			command.append(L"\"").append(path).append(L"\" ").append(args);

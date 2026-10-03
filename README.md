@@ -23,19 +23,17 @@ HKCR
 		{
 			NoRemove ContextMenuHandlers
 			{
-				ForceRemove ShellExt = s '{8545BEA4-83DF-4167-B67D-5FF71162F6D4}'
+				ForceRemove {8545BEA4-83DF-4167-B67D-5FF71162F6D4} = s 'https://github.com/datadiode/shellext'
 			}
 		}
 	}
 }
 
-[Format source code with clang-format]
+[Format source code with clang-format;*.c;*.h;*.cpp;*.hpp;*.cxx;*.hxx]
 command="clang-format.exe" -i "<filename>" ,1
-filter=*.c;*.h;*.cpp;*.hpp;*.cxx;*.hxx
 
-[Format source code with pasfmt]
+[Format source code with pasfmt;*.pas;*.iss]
 command="pasfmt.exe" "<filename>" ,1
-filter=*.pas;*.iss
 
 [ping 127.0.0.1 to see the progress window]
 command="ping.exe" "127.0.0.1" ,3

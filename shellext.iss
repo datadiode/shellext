@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=shellext
-AppVersion=1.0.0.3
+AppVersion=1.0.0.4
 AppId={{8545BEA4-83DF-4167-B67D-5FF71162F6D4}
 ShowLanguageDialog=no
 LanguageDetectionMethod=none
@@ -11,7 +11,7 @@ AppPublisher=datadiode
 AppPublisherURL=https://github.com/datadiode/shellext
 RestartApplications=True
 CloseApplicationsFilter=explorer.exe
-VersionInfoVersion=1.0.0.3
+VersionInfoVersion=1.0.0.4
 VersionInfoCompany=datadiode
 OutputBaseFilename=shellext-setup
 ArchitecturesInstallIn64BitMode=x64
