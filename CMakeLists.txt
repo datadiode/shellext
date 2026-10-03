@@ -13,7 +13,7 @@ target_sources(shellext
 
 target_compile_features(shellext
     PRIVATE
-        cxx_std_20
+        cxx_std_17
 )
 
 target_compile_definitions(shellext

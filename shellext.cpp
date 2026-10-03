@@ -256,7 +256,8 @@ STDMETHODIMP CShellExt::InvokeCommand(
 		if (!IS_INTRESOURCE(pici->lpVerb))
 			return E_INVALIDARG;
 		// extract command index from the low word
-		if (UINT idCmd = LOWORD(pici->lpVerb); idCmd < _sectionNames.size())
+		const UINT idCmd = LOWORD(pici->lpVerb);
+		if (idCmd < _sectionNames.size())
 		{
 			ProcessFiles(pici->hwnd, idCmd);
 			return S_OK;
@@ -309,15 +310,17 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 			if (*q == '~')
 				++q;
 
-			if (LPWSTR filter = std::wcsstr(utf16, L";*."); filter++ &&
-				std::any_of(_selectedFiles.begin(), _selectedFiles.end(),
-							[filter](const std::wstring& filename)
-							{
-								return !PathMatchSpec(filename.c_str(), filter);
-							}))
+			if (const LPWSTR filter = std::wcsstr(utf16, L";*"))
 			{
-				uFlags |= MF_GRAYED;
-				q = utf16;
+				if (std::any_of(_selectedFiles.begin(), _selectedFiles.end(),
+								[filter](const std::wstring& filename)
+								{
+									return !PathMatchSpec(filename.c_str(), filter + 1);
+								}))
+				{
+					uFlags |= MF_GRAYED;
+					q = utf16;
+				}
 			}
 
 			if (*q != '~')
@@ -355,7 +358,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	PathRenameExtension(module_path, L".ini");
 
 	const std::wstring key(PBYTE(&_sectionNames[idCmd].front()), PBYTE(&_sectionNames[idCmd].back() + 1));
-	const size_t keyfilter(key.find(L";*.") + 1); // if != 0, offset of the filter in the key string
+	const size_t keyfilter(key.find(L";*") + 1); // if != 0, offset of the filter in the key string
 
 	WCHAR command[1024];
 	GetPrivateProfileString(key.c_str(), L"command", L"", command, _countof(command), module_path);
@@ -382,7 +385,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	}
 	limit = std::clamp(limit, 1, MAXIMUM_WAIT_OBJECTS);
 
-	if (std::wstring_view(args).find(L"<destfolder>") != std::wstring_view::npos)
+	if (std::wcsstr(args, L"<destfolder>"))
 	{
 		CComBSTR title;
 		ATLENSURE(title.LoadString(2));
