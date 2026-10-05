@@ -1,0 +1,26 @@
+version: '{build}'
+
+image:
+- Visual Studio 2017
+
+platform:
+- Win32
+- x64
+
+before_build:
+- cmd: |-
+    cmake . -G "Visual Studio 15 2017" -A %PLATFORM% -T v140_xp
+
+build_script:
+- for %%x in (Debug, RelWithDebInfo, MinSizeRel) do msbuild shellext.sln -p:Platform=%PLATFORM% -p:Configuration=%%x & 7z a %%x-%PLATFORM%.7z shellext.ini shellext.png .\%%x\*.dll .\%%x\*.pdb
+
+deploy:
+  provider: GitHub
+  tag: $(APPVEYOR_REPO_TAG_NAME)
+  on:
+    APPVEYOR_REPO_TAG: true
+  auth_token:
+    secure: Ff432aLyTjRB02PAo9YoH+iRttges/GD2mpfggEdsZ+oDFoeYYzu3Z52IzsH+E1y
+
+artifacts:
+- path: '*.7z'
