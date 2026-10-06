@@ -115,6 +115,7 @@ private:
 #include <algorithm>
 #include <exception>
 #include <fstream>
+#include <memory>
 #include <new>
 #include <string>
 #include <vector>

@@ -88,9 +88,12 @@ private:
 	void ProcessFiles(HWND hWnd, UINT idCmd);
 
 	std::vector<std::wstring> _selectedFiles;
-	std::vector<std::string> _sectionNames;
-	HBITMAP _bitmap = NULL;
+	static std::vector<std::string> _sectionNames;
+	static std::unique_ptr<HBITMAP__, decltype(&DeleteObject)> _bitmap;
 };
+
+decltype(CShellExt::_sectionNames) CShellExt::_sectionNames;
+decltype(CShellExt::_bitmap) CShellExt::_bitmap(NULL, &DeleteObject);
 
 OBJECT_ENTRY_AUTO(_AtlModule.m_libid, CShellExt)
 
@@ -115,7 +118,7 @@ public:
 		// get point to the file names data
 		_hDrop = reinterpret_cast<HDROP>(::GlobalLock(_stgm.hGlobal));
 		ATLENSURE_THROW(_hDrop != NULL, E_INVALIDARG);
-		_fileCount = ::DragQueryFile(_hDrop, 0xFFFFFFFF, NULL, 0);
+		_fileCount = DragQueryFile(_hDrop, 0xFFFFFFFF, NULL, 0);
 	}
 
 	~FileEnumFromDataObject()
@@ -203,6 +206,11 @@ HRESULT CShellExt::UpdateRegistry(BOOL bRegister)
 
 HRESULT CShellExt::FinalConstruct()
 {
+	// When coming here for the first time, initialize some static data.
+	static LONG visited = FALSE;
+	if (InterlockedExchange(&visited, TRUE))
+		return S_OK;
+
 	try
 	{
 		WCHAR module_path[MAX_PATH];
@@ -229,7 +237,9 @@ HRESULT CShellExt::FinalConstruct()
 						Gdiplus::UnitPixel);
 					delete graphics;
 				}
-				scaled->GetHBITMAP(Gdiplus::Color::Transparent, &_bitmap);
+				HBITMAP handle = NULL;
+				scaled->GetHBITMAP(Gdiplus::Color::Transparent, &handle);
+				_bitmap.reset(handle);
 				delete scaled;
 			}
 			delete bitmap;
@@ -263,7 +273,6 @@ HRESULT CShellExt::FinalConstruct()
 
 void CShellExt::FinalRelease()
 {
-	DeleteObject(_bitmap);
 }
 
 STDMETHODIMP CShellExt::GetCommandString(
@@ -362,7 +371,7 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 					*r = L'\0';
 
 				InsertMenu(hMenu, indexMenu, uFlags, idCmdFirst, q);
-				SetMenuItemBitmaps(hMenu, indexMenu, MF_BYPOSITION, _bitmap, NULL);
+				SetMenuItemBitmaps(hMenu, indexMenu, MF_BYPOSITION, _bitmap.get(), NULL);
 				++indexMenu;
 			}
 

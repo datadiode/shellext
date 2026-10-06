@@ -12,7 +12,7 @@ before_build:
     cmake . -G "Visual Studio 15 2017" -A %PLATFORM% -T v140_xp
 
 build_script:
-- for %%x in (Debug, RelWithDebInfo, MinSizeRel) do msbuild shellext.sln -p:Platform=%PLATFORM% -p:Configuration=%%x & 7z a %%x-%PLATFORM%.7z shellext.ini shellext.png .\%%x\*.dll .\%%x\*.pdb
+- for %%x in (Debug, RelWithDebInfo, MinSizeRel) do msbuild shellext.sln -p:Platform=%PLATFORM% -p:Configuration=%%x && 7z a %%x-%PLATFORM%.7z shellext.ini shellext.png .\%%x\*.dll .\%%x\*.pdb
 
 deploy:
   provider: GitHub

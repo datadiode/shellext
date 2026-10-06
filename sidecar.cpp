@@ -47,12 +47,12 @@ STDAPI DllInstall(BOOL bInstall, LPCWSTR pszCmdLine)
 
 	if (pszCmdLine != NULL)
 	{
-#ifdef _DEBUG
+#ifdef DEBUG
 		static const WCHAR szTestSwitch[] = L"test";
 		if (_wcsnicmp(pszCmdLine, szTestSwitch, _countof(szTestSwitch)) == 0)
 		{
 			LPVOID pv = NULL;
-			if (FAILED(hr = DllGetClassObject(CLSID_ShellExt, IID_IClassFactory, &pv)))
+			if (FAILED(hr = DllGetClassObject(_AtlModule.m_libid, IID_IClassFactory, &pv)))
 				return hr;
 			if (FAILED(hr = static_cast<IClassFactory*>(pv)->CreateInstance(NULL, IID_IContextMenu, &pv)))
 				return hr;
