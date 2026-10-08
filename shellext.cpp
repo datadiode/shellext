@@ -168,7 +168,7 @@ STDMETHODIMP CShellExt::Initialize(
 	}
 	catch (...)
 	{
-		return UncatchAs<HRESULT>();
+		return _selectedFiles.size() == 0 ? S_OK : UncatchAs<HRESULT>();
 	}
 }
 
@@ -229,7 +229,7 @@ HRESULT CShellExt::FinalConstruct()
 				{
 					graphics->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
 					Gdiplus::RectF rect(0, 0, Gdiplus::REAL(scaled->GetWidth()), Gdiplus::REAL(scaled->GetHeight()));
-					COLORREF rgb = GetSysColor(COLOR_3DFACE);
+					COLORREF rgb = GetSysColor(COLOR_MENU);
 					Gdiplus::SolidBrush brush(Gdiplus::Color(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb)));
 					graphics->FillRectangle(&brush, rect);
 					graphics->DrawImage(bitmap, rect,
@@ -295,15 +295,27 @@ STDMETHODIMP CShellExt::InvokeCommand(
 			return E_INVALIDARG;
 		// extract command index from the low word
 		const UINT idCmd = LOWORD(pici->lpVerb);
+
+		// builtin desktop menu commands
+		if (_selectedFiles.empty())
+		{
+			switch (idCmd)
+			{
+			case 0:
+				RaiseException(EXCEPTION_BREAKPOINT, EXCEPTION_NONCONTINUABLE, 0, NULL);
+				break;
+			}
+			return S_OK;
+		}
+
+		// configurable file menu commands
 		if (idCmd < _sectionNames.size())
 		{
 			ProcessFiles(pici->hwnd, idCmd);
 			return S_OK;
 		}
-		else
-		{
-			return E_INVALIDARG;
-		}
+
+		return E_INVALIDARG;
 	}
 	catch (...)
 	{
@@ -322,6 +334,24 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 	{
 		if (uFlags & CMF_DEFAULTONLY) return 0;
 
+		UINT count = 0;
+
+		// builtin desktop menu commands
+		if (_selectedFiles.empty())
+		{
+			if (idCmdFirst < idCmdLast)
+			{
+				CComBSTR text;
+				ATLENSURE(text.LoadString(3));
+				InsertMenu(hMenu, indexMenu, MF_STRING | MF_BYPOSITION, idCmdFirst, text);
+				SetMenuItemBitmaps(hMenu, indexMenu, MF_STRING | MF_BYPOSITION | MF_HELP, _bitmap.get(), NULL);
+				++idCmdFirst;
+				++count;
+			}
+			return count;
+		}
+
+		// configurable file menu commands
 		const LCID lcid = GetUserDefaultUILanguage();
 		WCHAR lang[4];
 		WCHAR ctry[4];
@@ -332,7 +362,6 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 		StringCchPrintf(precise, _countof(precise), L";%s-%s=", lang, ctry);
 		StringCchPrintf(fallback, _countof(fallback), L";%s=", lang);
 
-		UINT count = 0;
 		for (const auto &sectionName : _sectionNames)
 		{
 			if (idCmdFirst == idCmdLast)
