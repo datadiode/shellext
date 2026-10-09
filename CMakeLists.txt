@@ -31,6 +31,7 @@ target_compile_definitions(shellext
 target_link_libraries(shellext
     PRIVATE
         Gdiplus
+        UxTheme
 )
 
 target_compile_options(shellext

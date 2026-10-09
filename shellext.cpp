@@ -4,6 +4,8 @@
 
 #include "common.h"
 #include <gdiplus.h>
+#include <uxtheme.h>
+#include <vssym32.h>
 
 CModule::CModule()
 {
@@ -230,6 +232,17 @@ HRESULT CShellExt::FinalConstruct()
 					graphics->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
 					Gdiplus::RectF rect(0, 0, Gdiplus::REAL(scaled->GetWidth()), Gdiplus::REAL(scaled->GetHeight()));
 					COLORREF rgb = GetSysColor(COLOR_MENU);
+					// https://learn.microsoft.com/en-us/answers/questions/2183035/
+					WCHAR theme_color[260];
+					if (SUCCEEDED(GetCurrentThemeName(NULL, 0, theme_color, _countof(theme_color), NULL, 0)))
+					{
+						StringCchCat(theme_color, _countof(theme_color), L"::Menu");
+						if (HTHEME theme = OpenThemeData(NULL, theme_color))
+						{
+							GetThemeColor(theme, MENU_POPUPBACKGROUND, 0, TMT_FILLCOLOR, &rgb);
+							CloseThemeData(theme);
+						}
+					}
 					Gdiplus::SolidBrush brush(Gdiplus::Color(GetRValue(rgb), GetGValue(rgb), GetBValue(rgb)));
 					graphics->FillRectangle(&brush, rect);
 					graphics->DrawImage(bitmap, rect,
@@ -302,7 +315,7 @@ STDMETHODIMP CShellExt::InvokeCommand(
 			switch (idCmd)
 			{
 			case 0:
-				RaiseException(EXCEPTION_BREAKPOINT, EXCEPTION_NONCONTINUABLE, 0, NULL);
+				std::terminate();
 				break;
 			}
 			return S_OK;
