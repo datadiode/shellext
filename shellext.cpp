@@ -107,17 +107,13 @@ OBJECT_ENTRY_AUTO(_AtlModule.m_libid, CShellExt)
 class FileEnumFromDataObject
 {
 public:
-	explicit FileEnumFromDataObject(IDataObject* pdtobj): 
-		_hDrop(NULL),
-		_fileCount(0)
-	{
-		ATLENSURE_THROW(pdtobj != NULL, E_INVALIDARG);
+	FileEnumFromDataObject(const FileEnumFromDataObject&) = delete;
+	FileEnumFromDataObject& operator=(const FileEnumFromDataObject&) = delete;
 
+	explicit FileEnumFromDataObject(IDataObject* pdtobj)
+	{
 		// format to request hdrop data from the data object
 		FORMATETC fmte = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-
-		memset(&_stgm, 0, sizeof(_stgm));
-		_stgm.tymed = TYMED_HGLOBAL;
 
 		// retrieve hdrop data from source data object
 		ATLENSURE_SUCCEEDED(pdtobj->GetData(&fmte, &_stgm));
@@ -147,11 +143,9 @@ public:
 	}
 
 private:
-	FileEnumFromDataObject(const FileEnumFromDataObject &);
-	FileEnumFromDataObject& operator=(const FileEnumFromDataObject &);
-	HDROP _hDrop;			// hdrop from IDataObject
-	STGMEDIUM _stgm;		// storage medium (global memory handle)
-	UINT _fileCount;
+	HDROP _hDrop{};
+	STGMEDIUM _stgm{ TYMED_HGLOBAL };
+	UINT _fileCount{};
 };
 
 STDMETHODIMP CShellExt::Initialize(
@@ -162,20 +156,31 @@ STDMETHODIMP CShellExt::Initialize(
 	try
 	{
 		_selectedFiles.clear();
-		FileEnumFromDataObject files(pdtobj);
-		for (UINT i = 0; i < files.FileCount(); ++i)
+		if (pdtobj)
 		{
-			auto filename = files.FileAt(i);
-			if (!filename.empty())
+			FileEnumFromDataObject files(pdtobj);
+			for (UINT i = 0; i < files.FileCount(); ++i)
 			{
-				_selectedFiles.push_back(filename);
+				auto filename = files.FileAt(i);
+				if (!filename.empty() && !PathIsRoot(filename.c_str()))
+				{
+					_selectedFiles.push_back(filename);
+				}
 			}
 		}
-		return _selectedFiles.size() != 0 ? S_OK : E_INVALIDARG;
+		else if (pidlFolder)
+		{
+			WCHAR path[MAX_PATH];
+			if (SHGetPathFromIDList(pidlFolder, path))
+			{
+				_selectedFiles.push_back(path);
+			}
+		}
+		return S_OK;
 	}
 	catch (...)
 	{
-		return _selectedFiles.size() == 0 ? S_OK : UncatchAs<HRESULT>();
+		return UncatchAs<HRESULT>();
 	}
 }
 
@@ -314,7 +319,7 @@ STDMETHODIMP CShellExt::InvokeCommand(
 		// extract command index from the low word
 		const UINT idCmd = LOWORD(pici->lpVerb);
 
-		// builtin desktop menu commands
+		// builtin menu commands
 		if (_selectedFiles.empty())
 		{
 			switch (idCmd)
@@ -354,7 +359,7 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 
 		UINT count = 0;
 
-		// builtin desktop menu commands
+		// builtin menu commands
 		if (_selectedFiles.empty())
 		{
 			if (idCmdFirst < idCmdLast)
@@ -363,6 +368,7 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 				ATLENSURE(text.LoadString(3));
 				InsertMenu(hMenu, indexMenu, MF_STRING | MF_BYPOSITION, idCmdFirst, text);
 				SetMenuItemBitmaps(hMenu, indexMenu, MF_STRING | MF_BYPOSITION | MF_HELP, _bitmap.get(), NULL);
+				++indexMenu;
 				++idCmdFirst;
 				++count;
 			}
@@ -501,17 +507,19 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	CComPtr<IProgressDialog> progress;
 	ATLENSURE_SUCCEEDED(progress.CoCreateInstance(CLSID_ProgressDialog, NULL, CLSCTX_INPROC_SERVER));
 
-	// Query the localized menu item text to use as the progress dialog title.
-	if (const HMENU hMenu = CreatePopupMenu())
+	if (!nowait)
 	{
-		WCHAR title[256];
-		QueryContextMenu(hMenu, 0, 0, static_cast<UINT>(_sectionNames.size()), 0);
-		GetMenuString(hMenu, idCmd, title, _countof(title), MF_BYCOMMAND);
-		progress->SetTitle(title);
-		DestroyMenu(hMenu);
+		// Query the localized menu item text to use as the progress dialog title.
+		if (const HMENU hMenu = CreatePopupMenu())
+		{
+			WCHAR title[256];
+			QueryContextMenu(hMenu, 0, 0, static_cast<UINT>(_sectionNames.size()), 0);
+			GetMenuString(hMenu, idCmd, title, _countof(title), MF_BYCOMMAND);
+			progress->SetTitle(title);
+			DestroyMenu(hMenu);
+		}
+		progress->StartProgressDialog(hWnd, NULL, PROGDLG_AUTOTIME, NULL);
 	}
-
-	progress->StartProgressDialog(hWnd, NULL, PROGDLG_AUTOTIME, NULL);
 
 	std::vector<HANDLE> satellites;
 	satellites.reserve(limit);
