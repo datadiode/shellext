@@ -198,7 +198,7 @@ HRESULT CShellExt::UpdateRegistry(BOOL bRegister)
 		if (std::getline(stream, data, L'['))
 		{
 			LPTSTR szReg = NULL;
-			ATLENSURE_SUCCEEDED(CRegParser(&ro).PreProcessBuffer(const_cast<LPWSTR>(data.c_str()), &szReg));
+			ATLENSURE_SUCCEEDED(CRegParser(&ro).PreProcessBuffer(data.data(), &szReg));
 			auto method = bRegister ? &IRegistrar::StringRegister : &IRegistrar::StringUnregister;
 			hr = (registrar->*method)(szReg);
 			CoTaskMemFree(szReg);
@@ -553,14 +553,13 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 
 			if (*verb)
 			{
-				const LPWSTR cmdline = const_cast<LPWSTR>(command.data());
 				SHELLEXECUTEINFOW se = { sizeof(se) };
 				se.fMask = SEE_MASK_NOCLOSEPROCESS;
 				se.nShow = show;
 				se.lpVerb = verb;
-				se.lpFile = cmdline;
-				se.lpParameters = PathGetArgs(cmdline);
-				PathRemoveArgs(cmdline);
+				se.lpFile = command.data();
+				se.lpParameters = PathGetArgs(command.data());
+				PathRemoveArgs(command.data());
 				if (ShellExecuteExW(&se))
 				{
 					if (nowait)
@@ -577,7 +576,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 				DWORD flags = 0;
 				if (show == SW_HIDE)
 					flags |= CREATE_NO_WINDOW;
-				if (CreateProcess(NULL, const_cast<LPWSTR>(command.data()), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
+				if (CreateProcess(NULL, command.data(), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
 				{
 					CloseHandle(pi.hThread);
 					if (nowait)
