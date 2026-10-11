@@ -44,6 +44,11 @@ void replace_all(std::wstring &str, const std::wstring &placeholder, const std::
 	}
 }
 
+BOOL PathMatchFileFolderSpec(LPCWSTR pszPath, LPCWSTR pszSpec)
+{
+	return PathMatchSpec(PathIsDirectory(pszPath) ? L"." : pszPath, pszSpec);
+}
+
 class ATL_NO_VTABLE CShellExt :
 	public CComObjectRootEx<CComSingleThreadModel>,
 	public CComCoClass<CShellExt, &_AtlModule.m_libid>,
@@ -118,7 +123,7 @@ public:
 		ATLENSURE_SUCCEEDED(pdtobj->GetData(&fmte, &_stgm));
 
 		// get point to the file names data
-		_hDrop = reinterpret_cast<HDROP>(::GlobalLock(_stgm.hGlobal));
+		_hDrop = reinterpret_cast<HDROP>(GlobalLock(_stgm.hGlobal));
 		ATLENSURE_THROW(_hDrop != NULL, E_INVALIDARG);
 		_fileCount = DragQueryFile(_hDrop, 0xFFFFFFFF, NULL, 0);
 	}
@@ -161,7 +166,7 @@ STDMETHODIMP CShellExt::Initialize(
 		for (UINT i = 0; i < files.FileCount(); ++i)
 		{
 			auto filename = files.FileAt(i);
-			if (!filename.empty()) 
+			if (!filename.empty())
 			{
 				_selectedFiles.push_back(filename);
 			}
@@ -390,12 +395,12 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 			if (*q == '~')
 				++q;
 
-			if (const LPWSTR filter = std::wcsstr(utf16, L";*"))
+			if (const LPWSTR filter = std::max<>(std::wcsstr(utf16, L";*"), std::wcsstr(utf16, L";.")))
 			{
 				if (std::any_of(_selectedFiles.begin(), _selectedFiles.end(),
 								[filter](const std::wstring& filename)
 								{
-									return !PathMatchSpec(filename.c_str(), filter + 1);
+									return !PathMatchFileFolderSpec(filename.c_str(), filter + 1);
 								}))
 				{
 					uFlags |= MF_GRAYED;
@@ -438,7 +443,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	PathRenameExtension(module_path, L".ini");
 
 	const std::wstring key(PBYTE(&_sectionNames[idCmd].front()), PBYTE(&_sectionNames[idCmd].back() + 1));
-	const size_t keyfilter(key.find(L";*") + 1); // if != 0, offset of the filter in the key string
+	const size_t keyfilter(std::max<>(key.find(L";*") + 1, key.find(L";.") + 1)); // if != 0, offset of the filter in the key string
 
 	WCHAR command[1024];
 	GetPrivateProfileString(key.c_str(), L"command", L"", command, _countof(command), module_path);
@@ -450,11 +455,19 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 
 	const int show = GetPrivateProfileInt(key.c_str(), L"show", SW_HIDE, module_path);
 
+	WCHAR verb[8];
+	GetPrivateProfileString(key.c_str(), L"verb", L"", verb, _countof(verb), module_path);
+
 	PathRemoveFileSpec(module_path);
 
 	// Assume an executable given without quotation marks lives in the same directory as the shell extension DLL.
 	WCHAR path[MAX_PATH];
 	PathCombine(path, PathUnquoteSpaces(command) ? NULL : module_path, command);
+
+	// Before calling PathParseIconLocation(), check for negative zero to decide whether to wait for the process.
+	bool nowait = false;
+	if (size_t i = std::wstring_view(args).rfind(L",-0") + 1)
+		nowait = args[i + 2] == L'\0';
 
 	int limit = PathParseIconLocation(args);
 	if (limit <= 0)
@@ -526,7 +539,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 			const auto &filename = *it++;
 
 			// Skip files that don't match the filter, if any.
-			if (keyfilter && !PathMatchSpec(filename.c_str(), &key[keyfilter]))
+			if (keyfilter && !PathMatchFileFolderSpec(filename.c_str(), &key[keyfilter]))
 				continue;
 
 			// Show the most recently added conversion candidate.
@@ -538,16 +551,40 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 			replace_all(command, L"<basename>", filename.substr(0, filename.find_last_of(L".")));
 			replace_all(command, L"<destfolder>", destfolder);
 
-			PROCESS_INFORMATION pi;
-			STARTUPINFOW si = { sizeof(si) };
-			si.wShowWindow = static_cast<WORD>(show);
-			DWORD flags = 0;
-			if (show == SW_HIDE)
-				flags |= CREATE_NO_WINDOW;
-			if (CreateProcess(NULL, const_cast<LPWSTR>(command.data()), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
+			if (*verb)
 			{
-				CloseHandle(pi.hThread);
-				satellites.push_back(pi.hProcess);
+				const LPWSTR cmdline = const_cast<LPWSTR>(command.data());
+				SHELLEXECUTEINFOW se = { sizeof(se) };
+				se.fMask = SEE_MASK_NOCLOSEPROCESS;
+				se.nShow = show;
+				se.lpVerb = verb;
+				se.lpFile = cmdline;
+				se.lpParameters = PathGetArgs(cmdline);
+				PathRemoveArgs(cmdline);
+				if (ShellExecuteExW(&se))
+				{
+					if (nowait)
+						CloseHandle(se.hProcess);
+					else
+						satellites.push_back(se.hProcess);
+				}
+			}
+			else
+			{
+				PROCESS_INFORMATION pi;
+				STARTUPINFOW si = { sizeof(si) };
+				si.wShowWindow = static_cast<WORD>(show);
+				DWORD flags = 0;
+				if (show == SW_HIDE)
+					flags |= CREATE_NO_WINDOW;
+				if (CreateProcess(NULL, const_cast<LPWSTR>(command.data()), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
+				{
+					CloseHandle(pi.hThread);
+					if (nowait)
+						CloseHandle(pi.hProcess);
+					else
+						satellites.push_back(pi.hProcess);
+				}
 			}
 		}
 	}
