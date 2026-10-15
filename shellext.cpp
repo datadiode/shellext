@@ -46,7 +46,11 @@ void replace_all(std::wstring &str, const std::wstring &placeholder, const std::
 
 BOOL PathMatchFileFolderSpec(LPCWSTR pszPath, LPCWSTR pszSpec)
 {
-	return PathMatchSpec(PathIsDirectory(pszPath) ? L"." : pszPath, pszSpec);
+	if (pszSpec[0] == L':' && pszSpec[1] == L'\0')
+		return PathIsRoot(pszPath);
+	if (pszSpec[0] == L'.' && pszSpec[1] == L'\0')
+		return PathIsDirectory(pszPath);
+	return PathMatchSpec(pszPath, pszSpec);
 }
 
 class ATL_NO_VTABLE CShellExt :
@@ -401,7 +405,7 @@ STDMETHODIMP CShellExt::QueryContextMenu(
 			if (*q == '~')
 				++q;
 
-			if (const LPWSTR filter = std::max<>(std::wcsstr(utf16, L";*"), std::wcsstr(utf16, L";.")))
+			if (const LPWSTR filter = std::max<>({ std::wcsstr(utf16, L";*"), std::wcsstr(utf16, L";."), std::wcsstr(utf16, L";:") }))
 			{
 				if (std::any_of(_selectedFiles.begin(), _selectedFiles.end(),
 								[filter](const std::wstring& filename)
@@ -449,20 +453,33 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 	PathRenameExtension(module_path, L".ini");
 
 	const std::wstring key(PBYTE(&_sectionNames[idCmd].front()), PBYTE(&_sectionNames[idCmd].back() + 1));
-	const size_t keyfilter(std::max<>(key.find(L";*") + 1, key.find(L";.") + 1)); // if != 0, offset of the filter in the key string
+	// keyfilter: if != 0, offset of the filter in the key string
+	const size_t keyfilter(std::max<>({ key.find(L";*") + 1, key.find(L";.") + 1, key.find(L";:") + 1 }));
 
 	WCHAR command[1024];
 	GetPrivateProfileString(key.c_str(), L"command", L"", command, _countof(command), module_path);
+	WCHAR verb[8];
+	GetPrivateProfileString(key.c_str(), L"verb", L"", verb, _countof(verb), module_path);
+	int show = GetPrivateProfileInt(key.c_str(), L"show", SW_HIDE, module_path);
+
+	std::wstring modifiers;
+	if (GetKeyState(VK_CONTROL) < 0)
+		modifiers.append(L"+control");
+	if (GetKeyState(VK_SHIFT) < 0)
+		modifiers.append(L"+shift");
+
+	if (!modifiers.empty())
+	{
+		GetPrivateProfileString(key.c_str(), (L"command" + modifiers).c_str(), std::wstring(command).c_str(), command, _countof(command), module_path);
+		GetPrivateProfileString(key.c_str(), (L"verb" + modifiers).c_str(), std::wstring(verb).c_str(), verb, _countof(verb), module_path);
+		show = GetPrivateProfileInt(key.c_str(), (L"show" + modifiers).c_str(), show, module_path);
+	}
+
 	const LPWSTR args = PathGetArgs(command);
 	PathRemoveArgs(command);
 
 	WCHAR destfolder[MAX_PATH];
 	GetPrivateProfileString(key.c_str(), L"destfolder", L".", destfolder, _countof(destfolder), module_path);
-
-	const int show = GetPrivateProfileInt(key.c_str(), L"show", SW_HIDE, module_path);
-
-	WCHAR verb[8];
-	GetPrivateProfileString(key.c_str(), L"verb", L"", verb, _countof(verb), module_path);
 
 	PathRemoveFileSpec(module_path);
 
@@ -544,7 +561,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 		}
 		while (satellites.size() < static_cast<DWORD>(limit) && it != _selectedFiles.end())
 		{
-			const auto &filename = *it++;
+			auto &filename = *it++;
 
 			// Skip files that don't match the filter, if any.
 			if (keyfilter && !PathMatchFileFolderSpec(filename.c_str(), &key[keyfilter]))
@@ -567,6 +584,7 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 				se.lpVerb = verb;
 				se.lpFile = command.data();
 				se.lpParameters = PathGetArgs(command.data());
+				se.lpDirectory = module_path;
 				PathRemoveArgs(command.data());
 				if (ShellExecuteExW(&se))
 				{
@@ -581,10 +599,11 @@ void CShellExt::ProcessFiles(HWND hWnd, UINT idCmd)
 				PROCESS_INFORMATION pi;
 				STARTUPINFOW si = { sizeof(si) };
 				si.wShowWindow = static_cast<WORD>(show);
+				si.lpTitle = filename.data();
 				DWORD flags = 0;
 				if (show == SW_HIDE)
 					flags |= CREATE_NO_WINDOW;
-				if (CreateProcess(NULL, command.data(), NULL, NULL, FALSE, flags, NULL, NULL, &si, &pi))
+				if (CreateProcess(NULL, command.data(), NULL, NULL, FALSE, flags, NULL, module_path, &si, &pi))
 				{
 					CloseHandle(pi.hThread);
 					if (nowait)
