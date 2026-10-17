@@ -7,12 +7,18 @@ platform:
 - Win32
 - x64
 
+install:
+- cmd: |-
+    curl -LO https://github.com/PeterDaveHello/inno-download-plugin/releases/download/v1.5.1/idpsetup-1.5.1.exe
+    idpsetup-1.5.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
 before_build:
 - cmd: |-
     cmake . -G "Visual Studio 15 2017" -A %PLATFORM% -T v141_xp
 
 build_script:
 - for %%x in (Debug, RelWithDebInfo, MinSizeRel) do msbuild shellext.sln -p:Platform=%PLATFORM% -p:Configuration=%%x && 7z a %%x-%PLATFORM%.7z shellext.ini shellext.png .\%%x\*.dll .\%%x\*.pdb
+- '"C:\Program Files (x86)\Inno Setup 5\ISCC.exe" shellext.iss /Fshellext-setup-%PLATFORM% /O.'
 
 deploy:
   provider: GitHub
@@ -24,3 +30,4 @@ deploy:
 
 artifacts:
 - path: '*.7z'
+- path: 'shellext-setup-*.exe'
